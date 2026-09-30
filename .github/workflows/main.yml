@@ -2,9 +2,9 @@ name: Daily Newspaper Bot
 
 on:
   schedule:
-    # Запуск каждый день в 03:00 UTC (это 08:00 по UTC+5 — часовому поясу из config.py)
+    # Запуск каждый день в 03:00 UTC (это 08:00 по часовому поясу редакции UTC+5)
     - cron: '0 3 * * *'
-  workflow_dispatch: # Добавляет кнопку "Run workflow" для ручного запуска в интерфейсе GitHub
+  workflow_dispatch: # Кнопка "Run workflow" для ручного запуска в интерфейсе GitHub
 
 jobs:
   build-and-publish:
@@ -20,24 +20,23 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      # Установка системных библиотек, без которых WeasyPrint не сможет собрать PDF
+      # Установка системных библиотек и шрифтов Liberation для правильной газетной типографики
       - name: Install system dependencies for WeasyPrint
         run: |
           sudo apt-get update
-          sudo apt-get install -y libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0 libffi-dev libgdk-pixbuf2.0-0 shared-mime-info
+          sudo apt-get install -y libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0 libffi-dev libgdk-pixbuf2.0-0 shared-mime-info fonts-liberation
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Получаем текущую дату для ключа кэша
-      - name: Get current date
+      # Получаем текущую дату по часовому поясу редакции (UTC+5) для точного совпадения с cache.py
+      - name: Get current date (UTC+5)
         id: date
-        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+        run: echo "date=$(TZ='Etc/GMT-5' date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
-      # Восстанавливаем кэш. Благодаря restore-keys, при перезапуске упавшего джоба 
-      # (например, если упал Telegram) подтянется самый свежий кэш за сегодня
+      # Восстанавливаем дневной кэш
       - name: Restore daily cache
         uses: actions/cache/restore@v4
         with:
@@ -46,7 +45,7 @@ jobs:
           restore-keys: |
             newspaper-cache-${{ steps.date.outputs.date }}-
 
-      # Запуск пайплайна с передачей секретов из GitHub
+      # Запуск пайплайна с секретами
       - name: Run newspaper pipeline
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -55,9 +54,23 @@ jobs:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: python pipeline.py
 
-      # Сохраняем кэш ДАЖЕ если скрипт упал с ошибкой. Это гарантирует, 
-      # что при повторном запуске бот не будет заново парсить новости или дергать Gemini.
+      # Сохраняем готовый PDF в артефакты запуска GitHub Actions (можно скачать в интерфейсе)
+      - name: Upload PDF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newspaper-${{ steps.date.outputs.date }}
+          path: newspaper.pdf
+          if-no-files-found: ignore
+
+      # Сохраняем кэш даже при ошибке, чтобы не парсить каналы и не тратить токены повторно
       - name: Save daily cache
+        if: always()
+        run: |
+          # Создаем пустой файл кэша, если скрипт упал до его создания (предотвращает сбой шага cache)
+          touch newspaper_cache.json
+        
+      - name: Cache persistence
         if: always()
         uses: actions/cache/save@v4
         with:
