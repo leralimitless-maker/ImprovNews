@@ -1,9 +1,0 @@
-requests
-weasyprint
-google-genai
-pydantic
-tenacity
-feedparser
-beautifulsoup4
-google-api-python-client
-google-auth-httplib2
